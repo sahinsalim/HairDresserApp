@@ -170,9 +170,11 @@ app.Run();
 
 static string GetPostgresConnectionString(IConfiguration configuration)
 {
-    var connectionString = configuration.GetConnectionString("Postgres")
-                           ?? configuration.GetConnectionString("DefaultConnection")
-                           ?? configuration["DATABASE_URL"];
+    var connectionString = FirstNonEmpty(
+        configuration.GetConnectionString("Postgres"),
+        configuration["DATABASE_URL"],
+        configuration["POSTGRES_URL"],
+        configuration.GetConnectionString("DefaultConnection"));
 
     if (string.IsNullOrWhiteSpace(connectionString))
     {
@@ -200,3 +202,6 @@ static string GetPostgresConnectionString(IConfiguration configuration)
 
     return npgsqlBuilder.ConnectionString;
 }
+
+static string? FirstNonEmpty(params string?[] values) =>
+    values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
