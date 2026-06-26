@@ -9,6 +9,8 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Twilio;
 
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
 // Müşteriler Türk olduğu için tarih/saat metinleri (ay, gün adları) Türkçe gösterilir.
 var turkishCulture = new CultureInfo("tr-TR");
 CultureInfo.DefaultThreadCurrentCulture = turkishCulture;
@@ -58,7 +60,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
         Directory.CreateDirectory(Path.GetDirectoryName(sqlitePath)!);
         options.UseSqlite($"Data Source={sqlitePath}");
     }
-});
+}, ServiceLifetime.Transient);
 
 builder.Services.AddHttpClient();
 
