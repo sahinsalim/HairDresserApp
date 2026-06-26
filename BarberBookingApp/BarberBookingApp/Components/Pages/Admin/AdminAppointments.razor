@@ -3,10 +3,102 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Roles = "Admin")]
 @inject IAppointmentService AppointmentService
+@inject AppDbContext Db
 
 <PageTitle>Randevular | Kuaför Arif Admin</PageTitle>
 
 <h2 class="mb-4">Randevular</h2>
+
+<div class="ka-card p-3 mb-4">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <div>
+            <h5 class="mb-1">Yeni Randevu Oluştur</h5>
+            <div class="text-muted small">Telefonla arayan müşteriler için admin tarafından randevu girin.</div>
+            <div class="text-muted small">Demo modunda SMS gönderimi yapılmaz; canlıda bildirim entegrasyonu açılabilir.</div>
+        </div>
+        <button class="btn btn-outline-gold" @onclick="() => showCreateForm = !showCreateForm">
+            @(showCreateForm ? "Formu Kapat" : "Randevu Ekle")
+        </button>
+    </div>
+
+    @if (showCreateForm)
+    {
+        <div class="row gy-3">
+            <div class="col-md-4">
+                <label class="form-label small">Müşteri Ad Soyad</label>
+                <input class="form-control" @bind="newCustomerName" @bind:event="oninput" placeholder="Ad Soyad" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small">Telefon</label>
+                <input type="tel" class="form-control" @bind="newCustomerPhone" @bind:event="oninput" placeholder="05XX XXX XX XX" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small">Hizmetler</label>
+                <div class="d-flex flex-column gap-2">
+                    @foreach (var service in serviceTypes)
+                    {
+                        <label class="d-flex align-items-center gap-2 text-muted small">
+                            <input type="checkbox"
+                                   checked="@newServiceIds.Contains(service.Id)"
+                                   @onchange="() => ToggleNewService(service.Id)" />
+                            <span>@service.Name (@service.DurationMinutes dk)</span>
+                        </label>
+                    }
+                </div>
+                @if (selectedNewServices.Count > 0)
+                {
+                    <div class="text-gold small mt-2">Tahmini süre: @newCombinedDurationMinutes dk</div>
+                }
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small">Tarih</label>
+                <input type="date" class="form-control" value="@newDate.ToString("yyyy-MM-dd")"
+                       min="@minDate.ToString("yyyy-MM-dd")" max="@maxDate.ToString("yyyy-MM-dd")"
+                       @onchange="OnNewDateChanged" />
+            </div>
+            <div class="col-md-8">
+                <label class="form-label small">Saat</label>
+                @if (newServiceIds.Count == 0)
+                {
+                    <div class="text-muted small py-2">Saatleri görmek için hizmet seçin.</div>
+                }
+                else if (loadingSlots)
+                {
+                    <div class="text-muted small py-2">Müsait saatler yükleniyor...</div>
+                }
+                else if (availableSlots.Count == 0)
+                {
+                    <div class="alert alert-warning small mb-0">Seçilen tarih için müsait saat yok.</div>
+                }
+                else
+                {
+                    <div class="ka-slot-grid">
+                        @foreach (var slot in availableSlots)
+                        {
+                            <button type="button" class="ka-slot-btn @(newSlot == slot ? "selected" : "")"
+                                    @onclick="() => newSlot = slot">
+                                @slot.ToString(@"hh\:mm")
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(createError))
+        {
+            <div class="alert alert-danger small mt-3">@createError</div>
+        }
+        @if (!string.IsNullOrWhiteSpace(createSuccess))
+        {
+            <div class="alert alert-success small mt-3">@createSuccess</div>
+        }
+
+        <button class="btn btn-gold mt-3" disabled="@(!CanCreateAppointment || creating)" @onclick="CreateManualAppointment">
+            @(creating ? "Oluşturuluyor..." : "Randevuyu Kaydet")
+        </button>
+    }
+</div>
 
 <div class="ka-card p-3 mb-4">
     <div class="row gy-2 align-items-end">
@@ -58,7 +150,7 @@ else
                         <td>@a.StartTime.ToString("dd.MM.yyyy HH:mm")</td>
                         <td>@a.Customer?.FullName</td>
                         <td>@a.Customer?.PhoneNumber</td>
-                        <td>@a.ServiceType?.Name</td>
+                        <td>@DisplayServices(a)</td>
                         <td>
                             <span class="badge @StatusBadgeClass(a.Status)">@StatusText(a.Status)</span>
                         </td>
@@ -79,7 +171,7 @@ else
                                     <label class="form-label small">İptal nedeni (müşteriye SMS olarak iletilmez, sadece kayıt için)</label>
                                     <textarea class="form-control mb-2" rows="2" @bind="cancelReason"></textarea>
                                     <button class="btn btn-sm btn-gold me-2" @onclick="() => ConfirmCancel(a.Id)" disabled="@cancelling">
-                                        @(cancelling ? "İşleniyor..." : "İptali Onayla ve SMS Gönder")
+                                        @(cancelling ? "İşleniyor..." : "İptali Onayla")
                                     </button>
                                     <button class="btn btn-sm btn-outline-gold" @onclick="() => cancelingId = null">Vazgeç</button>
                                 </div>
@@ -94,14 +186,45 @@ else
 
 @code {
     private List<Appointment>? appointments;
+    private List<ServiceType> serviceTypes = new();
     private DateTime? filterDate;
     private string filterStatus = string.Empty;
     private int? cancelingId;
     private string cancelReason = string.Empty;
     private bool cancelling;
+    private bool showCreateForm;
+    private string newCustomerName = string.Empty;
+    private string newCustomerPhone = string.Empty;
+    private HashSet<int> newServiceIds = new();
+    private List<ServiceType> selectedNewServices = new();
+    private int newCombinedDurationMinutes;
+    private DateOnly minDate;
+    private DateOnly maxDate;
+    private DateOnly newDate;
+    private List<TimeSpan> availableSlots = new();
+    private TimeSpan? newSlot;
+    private bool loadingSlots;
+    private bool creating;
+    private string? createError;
+    private string? createSuccess;
+
+    private bool CanCreateAppointment =>
+        !string.IsNullOrWhiteSpace(newCustomerName) &&
+        !string.IsNullOrWhiteSpace(newCustomerPhone) &&
+        newServiceIds.Count > 0 &&
+        newSlot is not null;
 
     protected override async Task OnInitializedAsync()
     {
+        minDate = AppointmentService.GetMinBookingDate();
+        maxDate = AppointmentService.GetMaxBookingDate();
+        newDate = minDate;
+
+        serviceTypes = await Db.ServiceTypes
+            .Where(s => s.IsActive)
+            .OrderBy(s => s.SortOrder)
+            .ToListAsync();
+
         await LoadAppointments();
     }
 
@@ -135,6 +258,135 @@ else
         cancelling = false;
         cancelingId = null;
         await LoadAppointments();
+    }
+
+    private async Task ToggleNewService(int serviceId)
+    {
+        if (!newServiceIds.Add(serviceId))
+        {
+            newServiceIds.Remove(serviceId);
+        }
+
+        selectedNewServices = serviceTypes
+            .Where(s => newServiceIds.Contains(s.Id))
+            .OrderBy(s => s.SortOrder)
+            .ToList();
+        newCombinedDurationMinutes = CalculateCombinedDurationMinutes(selectedNewServices);
+        newSlot = null;
+        await LoadAvailableSlots();
+    }
+
+    private async Task OnNewDateChanged(ChangeEventArgs e)
+    {
+        if (DateOnly.TryParse(e.Value?.ToString(), out var date))
+        {
+            newDate = date;
+            newSlot = null;
+            await LoadAvailableSlots();
+        }
+    }
+
+    private async Task LoadAvailableSlots()
+    {
+        createError = null;
+        createSuccess = null;
+
+        if (newServiceIds.Count == 0)
+        {
+            availableSlots = new();
+            return;
+        }
+
+        loadingSlots = true;
+        availableSlots = await AppointmentService.GetAvailableSlotsAsync(newDate, newServiceIds.ToList());
+        loadingSlots = false;
+    }
+
+    private async Task CreateManualAppointment()
+    {
+        createError = null;
+        createSuccess = null;
+
+        if (!CanCreateAppointment)
+        {
+            createError = "Lütfen müşteri, hizmet, tarih ve saat bilgilerini tamamlayın.";
+            return;
+        }
+
+        if (newCustomerPhone.Where(char.IsDigit).Count() < 10)
+        {
+            createError = "Lütfen geçerli bir telefon numarası girin.";
+            return;
+        }
+
+        creating = true;
+
+        var phone = newCustomerPhone.Trim();
+        var name = newCustomerName.Trim();
+        var customer = await Db.Customers.FirstOrDefaultAsync(c => c.PhoneNumber == phone);
+
+        if (customer is null)
+        {
+            customer = new Customer
+            {
+                FullName = name,
+                PhoneNumber = phone
+            };
+            Db.Customers.Add(customer);
+            await Db.SaveChangesAsync();
+        }
+        else if (!string.Equals(customer.FullName, name, StringComparison.Ordinal))
+        {
+            customer.FullName = name;
+            await Db.SaveChangesAsync();
+        }
+
+        var startTime = newDate.ToDateTime(TimeOnly.FromTimeSpan(newSlot!.Value));
+        var result = await AppointmentService.CreateAppointmentAsync(customer.Id, newServiceIds.ToList(), startTime);
+
+        creating = false;
+
+        if (!result.Success)
+        {
+            createError = result.ErrorMessage;
+            await LoadAvailableSlots();
+            return;
+        }
+
+        createSuccess = $"{customer.FullName} için {startTime:dd.MM.yyyy HH:mm} randevusu oluşturuldu.";
+        newCustomerName = string.Empty;
+        newCustomerPhone = string.Empty;
+        newServiceIds.Clear();
+        selectedNewServices = new();
+        newCombinedDurationMinutes = 0;
+        newSlot = null;
+        availableSlots = new();
+        await LoadAppointments();
+    }
+
+    private static int CalculateCombinedDurationMinutes(IReadOnlyCollection<ServiceType> services)
+    {
+        if (services.Count == 0)
+        {
+            return 0;
+        }
+
+        var durations = services.Select(s => s.DurationMinutes).OrderByDescending(d => d).ToList();
+        var total = durations[0] + durations.Skip(1).Sum(d => d / 2.0);
+        return (int)(Math.Ceiling(total / 5.0) * 5);
+    }
+
+    private static string DisplayServices(Appointment appointment)
+    {
+        if (appointment.ServiceItems.Count > 0)
+        {
+            return string.Join(" + ", appointment.ServiceItems
+                .Where(i => i.ServiceType is not null)
+                .OrderBy(i => i.ServiceType!.SortOrder)
+                .Select(i => i.ServiceType!.Name));
+        }
+
+        return appointment.ServiceType?.Name ?? "-";
     }
 
     private static string StatusBadgeClass(AppointmentStatus status) => status switch

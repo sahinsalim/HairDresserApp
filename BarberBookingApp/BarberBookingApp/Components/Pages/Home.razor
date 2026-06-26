@@ -14,7 +14,7 @@
                 <span class="ka-hero-badge"><i class="bi bi-stars me-1"></i>Profesyonel Erkek Kuaförü</span>
                 <h1 class="mb-3">Stilinizi <span class="text-gold">Arif'in</span> Ellerine Bırakın</h1>
                 <p class="lead mb-4">
-                    Darende, Malatya'da 15 yılı aşkın tecrübe. Saç ve sakalda klasik ustalık, modern dokunuş.
+                    İstanbul Esenyurt Cumhuriyet Mahallesi'nde 15 yılı aşkın tecrübe. Saç ve sakalda klasik ustalık, modern dokunuş.
                     Randevunuzu saniyeler içinde online alın.
                 </p>
                 <div class="d-flex flex-wrap gap-3 ka-hero-actions">
@@ -41,12 +41,12 @@
             <div class="col-md-4">
                 <i class="bi bi-clock text-gold fs-2"></i>
                 <h6 class="mt-2 mb-1">Çalışma Saatleri</h6>
-                <p class="text-muted mb-0">Cuma hariç her gün<br />09:00 - 19:00</p>
+                <p class="text-muted mb-0">@((MarkupString)WorkingHoursSummary)</p>
             </div>
             <div class="col-md-4">
                 <i class="bi bi-geo-alt text-gold fs-2"></i>
                 <h6 class="mt-2 mb-1">Adres</h6>
-                <p class="text-muted mb-0">Darende<br />Malatya</p>
+                <p class="text-muted mb-0">Cumhuriyet Mahallesi<br />Esenyurt / İstanbul</p>
             </div>
             <div class="col-md-4">
                 <i class="bi bi-telephone text-gold fs-2"></i>
@@ -78,13 +78,10 @@
                             <div class="ka-icon"><i class="@s.Icon"></i></div>
                             <h5>@s.Name</h5>
                             <p class="text-muted small mb-2">@s.Description</p>
-                            <div class="d-flex justify-content-between align-items-center">
-                                <span class="text-gold fw-semibold">@s.DurationMinutes dk</span>
-                                @if (s.Price > 0)
-                                {
-                                    <span class="fw-semibold">@s.Price.ToString("0") ₺</span>
-                                }
-                            </div>
+                            @if (s.Price > 0)
+                            {
+                                <div class="text-gold fw-semibold">@s.Price.ToString("0") ₺</div>
+                            }
                         </div>
                     </div>
                 }
@@ -108,7 +105,7 @@
                 <div class="ka-kicker">Hakkımda</div>
                 <h2 class="mb-3">Merhaba, Ben Arif</h2>
                 <p class="text-muted">
-                    Berberlik sanatına olan tutkumla 15 yılı aşkın süredir Darende, Malatya'da hizmet veriyorum. Her müşterimin
+                    Berberlik sanatına olan tutkumla 15 yılı aşkın süredir İstanbul Esenyurt'ta hizmet veriyorum. Her müşterimin
                     yüz hattına ve kişisel stiline uygun, özgün bir görünüm yaratmayı kendime ilke edindim.
                 </p>
                 <a href="/hakkimda" class="btn btn-outline-gold mt-2">Devamını Oku</a>
@@ -161,6 +158,8 @@
 
 @code {
     private List<ServiceType>? services;
+    private List<WorkingHour> workingHours = new();
+    private string WorkingHoursSummary => BuildWorkingHoursSummary();
 
     protected override async Task OnInitializedAsync()
     {
@@ -168,5 +167,43 @@
             .Where(s => s.IsActive)
             .OrderBy(s => s.SortOrder)
             .ToListAsync();
+
+        workingHours = await Db.WorkingHours
+            .OrderBy(w => w.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)w.DayOfWeek)
+            .ToListAsync();
     }
+
+    private string BuildWorkingHoursSummary()
+    {
+        var openDays = workingHours.Where(w => w.IsOpen).ToList();
+        if (openDays.Count == 0)
+        {
+            return "Şu anda kapalı";
+        }
+
+        var first = openDays[0];
+        var sameHours = openDays.All(w => w.StartTime == first.StartTime && w.EndTime == first.EndTime);
+        var closedDays = workingHours.Where(w => !w.IsOpen).Select(w => TurkceGun(w.DayOfWeek)).ToList();
+
+        if (sameHours)
+        {
+            var closedText = closedDays.Count == 0 ? "Her gün" : $"{string.Join(", ", closedDays)} hariç";
+            return $"{closedText}<br />{first.StartTime:hh\\:mm} - {first.EndTime:hh\\:mm}";
+        }
+
+        return string.Join("<br />", openDays.Take(3)
+            .Select(w => $"{TurkceGun(w.DayOfWeek)} {w.StartTime:hh\\:mm} - {w.EndTime:hh\\:mm}"));
+    }
+
+    private static string TurkceGun(DayOfWeek day) => day switch
+    {
+        DayOfWeek.Monday => "Pazartesi",
+        DayOfWeek.Tuesday => "Salı",
+        DayOfWeek.Wednesday => "Çarşamba",
+        DayOfWeek.Thursday => "Perşembe",
+        DayOfWeek.Friday => "Cuma",
+        DayOfWeek.Saturday => "Cumartesi",
+        DayOfWeek.Sunday => "Pazar",
+        _ => day.ToString()
+    };
 }

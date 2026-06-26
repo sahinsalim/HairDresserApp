@@ -1,0 +1,120 @@
+@page "/admin/mesajlar"
+@layout AdminLayout
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Admin")]
+@inject AppDbContext Db
+
+<PageTitle>Gelen Mesajlar | Kuaför Arif Admin</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
+    <div>
+        <h2 class="mb-1">Gelen Mesajlar</h2>
+        <div class="text-muted small">İletişim formundan gönderilen müşteri talepleri.</div>
+    </div>
+    <button class="btn btn-outline-gold" @onclick="LoadMessages">Yenile</button>
+</div>
+
+<div class="row gy-4 mb-4">
+    <div class="col-md-4">
+        <div class="ka-card p-4">
+            <div class="ka-icon"><i class="bi bi-envelope"></i></div>
+            <h3 class="mb-0">@totalCount</h3>
+            <p class="text-muted mb-0">Toplam Mesaj</p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="ka-card p-4">
+            <div class="ka-icon"><i class="bi bi-envelope-exclamation"></i></div>
+            <h3 class="mb-0">@unreadCount</h3>
+            <p class="text-muted mb-0">Okunmamış Mesaj</p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="ka-card p-4">
+            <div class="ka-icon"><i class="bi bi-calendar-event"></i></div>
+            <h3 class="mb-0">@todayCount</h3>
+            <p class="text-muted mb-0">Bugün Gelen</p>
+        </div>
+    </div>
+</div>
+
+@if (messages is null)
+{
+    <p class="text-muted">Yükleniyor...</p>
+}
+else if (messages.Count == 0)
+{
+    <div class="ka-card p-4 text-center">
+        <i class="bi bi-inbox text-gold" style="font-size:2.5rem;"></i>
+        <p class="text-muted mt-3 mb-0">Henüz gelen mesaj bulunmuyor.</p>
+    </div>
+}
+else
+{
+    <div class="d-flex flex-column gap-3">
+        @foreach (var message in messages)
+        {
+            <div class="ka-card p-4">
+                <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-3">
+                    <div>
+                        <h5 class="mb-1">@message.Name</h5>
+                        <div class="text-muted small">
+                            <i class="bi bi-telephone me-1"></i>@message.Phone
+                            <span class="mx-2">·</span>
+                            <i class="bi bi-clock me-1"></i>@message.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                        </div>
+                    </div>
+                    <span class="badge @(message.IsRead ? "badge-completed" : "badge-confirmed")">
+                        @(message.IsRead ? "Okundu" : "Yeni")
+                    </span>
+                </div>
+                <p class="text-muted mb-3">@message.Message</p>
+                @if (!message.IsRead)
+                {
+                    <button class="btn btn-sm btn-outline-gold" @onclick="() => MarkAsRead(message.Id)">
+                        Okundu İşaretle
+                    </button>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<ContactMessage>? messages;
+    private int totalCount;
+    private int unreadCount;
+    private int todayCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadMessages();
+    }
+
+    private async Task LoadMessages()
+    {
+        messages = await Db.ContactMessages
+            .OrderByDescending(m => m.CreatedAt)
+            .ToListAsync();
+
+        totalCount = messages.Count;
+        unreadCount = messages.Count(m => !m.IsRead);
+
+        var today = DateTime.UtcNow.Date;
+        var tomorrow = today.AddDays(1);
+        todayCount = messages.Count(m => m.CreatedAt >= today && m.CreatedAt < tomorrow);
+    }
+
+    private async Task MarkAsRead(int id)
+    {
+        var message = await Db.ContactMessages.FindAsync(id);
+        if (message is null)
+        {
+            return;
+        }
+
+        message.IsRead = true;
+        await Db.SaveChangesAsync();
+        await LoadMessages();
+    }
+}

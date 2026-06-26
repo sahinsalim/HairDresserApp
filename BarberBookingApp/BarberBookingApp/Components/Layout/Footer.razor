@@ -1,3 +1,5 @@
+@inject AppDbContext Db
+
 <footer class="ka-footer">
     <div class="container">
         <div class="row gy-4">
@@ -29,12 +31,58 @@
             </div>
             <div class="col-12 col-lg-3">
                 <h6 class="text-gold mb-3">İletişim</h6>
-                <p class="mb-1"><i class="bi bi-geo-alt me-2"></i>Darende / Malatya</p>
+                <p class="mb-1"><i class="bi bi-geo-alt me-2"></i>Cumhuriyet Mah. Esenyurt / İstanbul</p>
                 <p class="mb-1"><i class="bi bi-telephone me-2"></i>+90 555 123 45 67</p>
-                <p class="mb-1"><i class="bi bi-clock me-2"></i>Cuma hariç her gün 09:00 - 19:00</p>
+                <p class="mb-1"><i class="bi bi-clock me-2"></i>@((MarkupString)WorkingHoursSummary)</p>
             </div>
         </div>
         <hr class="my-4" style="border-color: var(--ka-border);" />
         <p class="text-center small mb-0">&copy; @DateTime.Now.Year Kuaför Arif. Tüm hakları saklıdır.</p>
     </div>
 </footer>
+
+@code {
+    private List<WorkingHour> workingHours = new();
+    private string WorkingHoursSummary => BuildWorkingHoursSummary();
+
+    protected override async Task OnInitializedAsync()
+    {
+        workingHours = await Db.WorkingHours
+            .OrderBy(w => w.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)w.DayOfWeek)
+            .ToListAsync();
+    }
+
+    private string BuildWorkingHoursSummary()
+    {
+        var openDays = workingHours.Where(w => w.IsOpen).ToList();
+        if (openDays.Count == 0)
+        {
+            return "Şu anda kapalı";
+        }
+
+        var first = openDays[0];
+        var sameHours = openDays.All(w => w.StartTime == first.StartTime && w.EndTime == first.EndTime);
+        var closedDays = workingHours.Where(w => !w.IsOpen).Select(w => TurkceGun(w.DayOfWeek)).ToList();
+
+        if (sameHours)
+        {
+            var closedText = closedDays.Count == 0 ? "Her gün" : $"{string.Join(", ", closedDays)} hariç";
+            return $"{closedText} {first.StartTime:hh\\:mm} - {first.EndTime:hh\\:mm}";
+        }
+
+        return string.Join("<br />", openDays.Take(2)
+            .Select(w => $"{TurkceGun(w.DayOfWeek)} {w.StartTime:hh\\:mm} - {w.EndTime:hh\\:mm}"));
+    }
+
+    private static string TurkceGun(DayOfWeek day) => day switch
+    {
+        DayOfWeek.Monday => "Pazartesi",
+        DayOfWeek.Tuesday => "Salı",
+        DayOfWeek.Wednesday => "Çarşamba",
+        DayOfWeek.Thursday => "Perşembe",
+        DayOfWeek.Friday => "Cuma",
+        DayOfWeek.Saturday => "Cumartesi",
+        DayOfWeek.Sunday => "Pazar",
+        _ => day.ToString()
+    };
+}

@@ -5,8 +5,10 @@ namespace BarberBookingApp.Services;
 public interface IAppointmentService
 {
     Task<List<TimeSpan>> GetAvailableSlotsAsync(DateOnly date, int serviceTypeId);
+    Task<List<TimeSpan>> GetAvailableSlotsAsync(DateOnly date, IReadOnlyCollection<int> serviceTypeIds);
 
     Task<AppointmentResult> CreateAppointmentAsync(int customerId, int serviceTypeId, DateTime startTime);
+    Task<AppointmentResult> CreateAppointmentAsync(int customerId, IReadOnlyCollection<int> serviceTypeIds, DateTime startTime);
 
     Task<List<Appointment>> GetCustomerAppointmentsAsync(int customerId);
 

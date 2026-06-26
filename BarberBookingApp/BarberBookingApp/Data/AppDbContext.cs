@@ -14,6 +14,7 @@ public class AppDbContext : DbContext
     public DbSet<ServiceType> ServiceTypes => Set<ServiceType>();
     public DbSet<WorkingHour> WorkingHours => Set<WorkingHour>();
     public DbSet<Appointment> Appointments => Set<Appointment>();
+    public DbSet<AppointmentServiceItem> AppointmentServiceItems => Set<AppointmentServiceItem>();
     public DbSet<OtpVerification> OtpVerifications => Set<OtpVerification>();
     public DbSet<SmsLog> SmsLogs => Set<SmsLog>();
     public DbSet<ContactMessage> ContactMessages => Set<ContactMessage>();
@@ -52,5 +53,21 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<Appointment>()
             .HasIndex(a => new { a.StartTime, a.Status });
+
+        modelBuilder.Entity<AppointmentServiceItem>()
+            .HasOne(i => i.Appointment)
+            .WithMany(a => a.ServiceItems)
+            .HasForeignKey(i => i.AppointmentId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<AppointmentServiceItem>()
+            .HasOne(i => i.ServiceType)
+            .WithMany()
+            .HasForeignKey(i => i.ServiceTypeId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<AppointmentServiceItem>()
+            .HasIndex(i => new { i.AppointmentId, i.ServiceTypeId })
+            .IsUnique();
     }
 }

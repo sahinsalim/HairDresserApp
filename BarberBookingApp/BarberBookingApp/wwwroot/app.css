@@ -464,6 +464,47 @@ h1:focus {
     color: #ff8585;
 }
 
+/* ---------- Admin calendar ---------- */
+.ka-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+}
+
+.ka-calendar-booked {
+    background: rgba(205, 163, 73, 0.12);
+    border: 1px solid rgba(205, 163, 73, 0.45);
+    border-radius: 10px;
+    padding: .7rem .8rem;
+}
+
+.ka-calendar-slots {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+    gap: .4rem;
+}
+
+.ka-calendar-slot {
+    border-radius: 8px;
+    padding: .35rem .25rem;
+    text-align: center;
+    font-size: .78rem;
+    font-weight: 600;
+    border: 1px solid var(--ka-border);
+}
+
+.ka-calendar-slot.free {
+    background: rgba(38, 176, 80, 0.11);
+    color: #9ee6b4;
+    border-color: rgba(38, 176, 80, 0.35);
+}
+
+.ka-calendar-slot.busy {
+    background: rgba(229, 57, 53, 0.12);
+    color: #ffaaa8;
+    border-color: rgba(229, 57, 53, 0.35);
+}
+
 .blazor-error-boundary {
     background: #b32121;
     padding: 1rem 1rem 1rem 1.5rem;

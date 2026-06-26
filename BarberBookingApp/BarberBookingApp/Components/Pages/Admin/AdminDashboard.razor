@@ -9,34 +9,102 @@
 <h2 class="mb-4">Hoş Geldin, Arif</h2>
 
 <div class="row gy-4 mb-4">
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="ka-card p-4">
             <div class="ka-icon"><i class="bi bi-calendar-day"></i></div>
             <h3 class="mb-0">@todayCount</h3>
             <p class="text-muted mb-0">Bugünkü Randevu</p>
         </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="ka-card p-4">
             <div class="ka-icon"><i class="bi bi-calendar-week"></i></div>
             <h3 class="mb-0">@upcomingCount</h3>
             <p class="text-muted mb-0">Yaklaşan (7 Gün) Randevu</p>
         </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="ka-card p-4">
             <div class="ka-icon"><i class="bi bi-people"></i></div>
             <h3 class="mb-0">@customerCount</h3>
             <p class="text-muted mb-0">Toplam Müşteri</p>
         </div>
     </div>
+    <div class="col-md-3">
+        <div class="ka-card p-4">
+            <div class="ka-icon"><i class="bi bi-envelope-exclamation"></i></div>
+            <h3 class="mb-0">@unreadMessageCount</h3>
+            <p class="text-muted mb-0">Okunmamış Mesaj</p>
+        </div>
+    </div>
+</div>
+
+<div class="row gy-4 mb-4">
+    <div class="col-lg-8">
+        <div class="ka-card p-4 h-100">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                <h5 class="mb-0">Bugünün Randevuları</h5>
+                <a href="/admin/randevular" class="btn btn-sm btn-outline-gold">Tümünü Gör</a>
+            </div>
+            @if (todayAppointments is null || todayAppointments.Count == 0)
+            {
+                <p class="text-muted mb-0">Bugün için planlanmış randevu bulunmuyor.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-dark-ka align-middle">
+                        <thead>
+                            <tr>
+                                <th>Saat</th>
+                                <th>Müşteri</th>
+                                <th>Telefon</th>
+                                <th>Hizmet</th>
+                                <th>Durum</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var a in todayAppointments)
+                            {
+                                <tr>
+                                    <td>@a.StartTime.ToString("HH:mm")</td>
+                                    <td>@a.Customer?.FullName</td>
+                                    <td>@a.Customer?.PhoneNumber</td>
+                                    <td>@DisplayServices(a)</td>
+                                    <td>
+                                        <span class="badge @(a.Status == AppointmentStatus.Cancelled ? "badge-cancelled" : "badge-confirmed")">
+                                            @(a.Status == AppointmentStatus.Cancelled ? "İptal" : "Onaylı")
+                                        </span>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="ka-card p-4 h-100">
+            <h5 class="mb-3">İşletme Özeti</h5>
+            <div class="d-flex justify-content-between border-bottom border-secondary pb-2 mb-2">
+                <span class="text-muted">En Çok Alınan Hizmet</span>
+                <span class="fw-semibold text-end">@popularServiceName</span>
+            </div>
+            <div class="d-flex justify-content-between border-bottom border-secondary pb-2 mb-2">
+                <span class="text-muted">Son Gelen Mesaj</span>
+                <span class="fw-semibold text-end">@lastMessageText</span>
+            </div>
+            <a href="/admin/mesajlar" class="btn btn-outline-gold w-100 mt-3">Mesajları Gör</a>
+        </div>
+    </div>
 </div>
 
 <div class="ka-card p-4">
-    <h5 class="mb-3">Bugünün Randevuları</h5>
-    @if (todayAppointments is null || todayAppointments.Count == 0)
+    <h5 class="mb-3">Yaklaşan Randevular</h5>
+    @if (nextAppointments.Count == 0)
     {
-        <p class="text-muted mb-0">Bugün için planlanmış randevu bulunmuyor.</p>
+        <p class="text-muted mb-0">Yaklaşan randevu bulunmuyor.</p>
     }
     else
     {
@@ -44,40 +112,37 @@
             <table class="table table-dark-ka align-middle">
                 <thead>
                     <tr>
-                        <th>Saat</th>
+                        <th>Tarih / Saat</th>
                         <th>Müşteri</th>
                         <th>Telefon</th>
                         <th>Hizmet</th>
-                        <th>Durum</th>
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var a in todayAppointments)
+                    @foreach (var a in nextAppointments)
                     {
                         <tr>
-                            <td>@a.StartTime.ToString("HH:mm")</td>
+                            <td>@a.StartTime.ToString("dd.MM.yyyy HH:mm")</td>
                             <td>@a.Customer?.FullName</td>
                             <td>@a.Customer?.PhoneNumber</td>
-                            <td>@a.ServiceType?.Name</td>
-                            <td>
-                                <span class="badge @(a.Status == AppointmentStatus.Cancelled ? "badge-cancelled" : "badge-confirmed")">
-                                    @(a.Status == AppointmentStatus.Cancelled ? "İptal" : "Onaylı")
-                                </span>
-                            </td>
+                            <td>@DisplayServices(a)</td>
                         </tr>
                     }
                 </tbody>
             </table>
         </div>
     }
-    <a href="/admin/randevular" class="btn btn-outline-gold mt-3">Tüm Randevuları Gör</a>
 </div>
 
 @code {
     private int todayCount;
     private int upcomingCount;
     private int customerCount;
+    private int unreadMessageCount;
+    private string popularServiceName = "-";
+    private string lastMessageText = "-";
     private List<Appointment>? todayAppointments;
+    private List<Appointment> nextAppointments = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -91,5 +156,41 @@
             a.Status != AppointmentStatus.Cancelled && a.StartTime >= now && a.StartTime <= weekAhead);
 
         customerCount = await Db.Customers.CountAsync();
+        unreadMessageCount = await Db.ContactMessages.CountAsync(m => !m.IsRead);
+
+        popularServiceName = await Db.Appointments
+            .Where(a => a.Status != AppointmentStatus.Cancelled)
+            .GroupBy(a => a.ServiceType!.Name)
+            .OrderByDescending(g => g.Count())
+            .Select(g => g.Key)
+            .FirstOrDefaultAsync() ?? "-";
+
+        var lastMessage = await Db.ContactMessages
+            .OrderByDescending(m => m.CreatedAt)
+            .FirstOrDefaultAsync();
+        lastMessageText = lastMessage is null ? "-" : $"{lastMessage.Name} - {lastMessage.Phone}";
+
+        nextAppointments = await Db.Appointments
+            .Include(a => a.Customer)
+            .Include(a => a.ServiceType)
+            .Include(a => a.ServiceItems)
+                .ThenInclude(i => i.ServiceType)
+            .Where(a => a.Status != AppointmentStatus.Cancelled && a.StartTime >= now)
+            .OrderBy(a => a.StartTime)
+            .Take(5)
+            .ToListAsync();
+    }
+
+    private static string DisplayServices(Appointment appointment)
+    {
+        if (appointment.ServiceItems.Count > 0)
+        {
+            return string.Join(" + ", appointment.ServiceItems
+                .Where(i => i.ServiceType is not null)
+                .OrderBy(i => i.ServiceType!.SortOrder)
+                .Select(i => i.ServiceType!.Name));
+        }
+
+        return appointment.ServiceType?.Name ?? "-";
     }
 }

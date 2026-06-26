@@ -1,0 +1,204 @@
+@page "/admin/takvim"
+@layout AdminLayout
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Admin")]
+@inject AppDbContext Db
+@inject IConfiguration Configuration
+
+<PageTitle>Takvim | Kuaför Arif Admin</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
+    <div>
+        <h2 class="mb-1">Haftalık Takvim</h2>
+        <div class="text-muted small">Bugünden başlayarak 7 günlük dolu ve boş randevu planı.</div>
+    </div>
+    <a href="/admin/randevular" class="btn btn-gold">
+        <i class="bi bi-calendar-plus me-1"></i>Randevu Ekle
+    </a>
+</div>
+
+<div class="row gy-3 mb-4">
+    <div class="col-md-4">
+        <div class="ka-card p-4">
+            <div class="ka-icon"><i class="bi bi-calendar-check"></i></div>
+            <h3 class="mb-0">@busyCount</h3>
+            <p class="text-muted mb-0">Planlı Randevu</p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="ka-card p-4">
+            <div class="ka-icon"><i class="bi bi-clock"></i></div>
+            <h3 class="mb-0">@freeSlotCount</h3>
+            <p class="text-muted mb-0">Boş Saat Dilimi</p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="ka-card p-4">
+            <div class="ka-icon"><i class="bi bi-door-closed"></i></div>
+            <h3 class="mb-0">@closedDayCount</h3>
+            <p class="text-muted mb-0">Kapalı Gün</p>
+        </div>
+    </div>
+</div>
+
+@if (days is null)
+{
+    <p class="text-muted">Takvim yükleniyor...</p>
+}
+else
+{
+    <div class="ka-calendar-grid">
+        @foreach (var day in days)
+        {
+            <div class="ka-card p-3">
+                <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
+                    <div>
+                        <h5 class="mb-0">@TurkceGun(day.Date.DayOfWeek)</h5>
+                        <div class="text-muted small">@day.Date.ToString("dd.MM.yyyy")</div>
+                    </div>
+                    @if (day.Date == today)
+                    {
+                        <span class="badge badge-confirmed">Bugün</span>
+                    }
+                </div>
+
+                @if (!day.IsOpen)
+                {
+                    <div class="alert alert-secondary small mb-0">Kapalı</div>
+                }
+                else
+                {
+                    <div class="text-muted small mb-2">
+                        @day.Start.ToString(@"hh\:mm") - @day.End.ToString(@"hh\:mm")
+                    </div>
+
+                    @if (day.Appointments.Count > 0)
+                    {
+                        <div class="d-flex flex-column gap-2 mb-3">
+                            @foreach (var appointment in day.Appointments)
+                            {
+                                <div class="ka-calendar-booked">
+                                    <div class="fw-semibold">@appointment.StartTime.ToString("HH:mm") - @appointment.EndTime.ToString("HH:mm")</div>
+                                    <div>@appointment.Customer?.FullName</div>
+                                    <div class="text-muted small">@DisplayServices(appointment)</div>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    <div class="ka-calendar-slots">
+                        @foreach (var slot in day.Slots)
+                        {
+                            <span class="ka-calendar-slot @(slot.IsBusy ? "busy" : "free")">
+                                @slot.Time.ToString(@"hh\:mm")
+                            </span>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private DateOnly today;
+    private List<CalendarDay>? days;
+    private int busyCount;
+    private int freeSlotCount;
+    private int closedDayCount;
+    private int slotStepMinutes;
+
+    protected override async Task OnInitializedAsync()
+    {
+        slotStepMinutes = Configuration.GetValue("AppSettings:SlotStepMinutes", 15);
+        today = DateOnly.FromDateTime(DateTime.Now);
+
+        var endDate = today.AddDays(6);
+        var startDateTime = today.ToDateTime(TimeOnly.MinValue);
+        var endDateTime = endDate.ToDateTime(TimeOnly.MaxValue);
+
+        var workingHours = await Db.WorkingHours.ToListAsync();
+        var appointments = await Db.Appointments
+            .Include(a => a.Customer)
+            .Include(a => a.ServiceType)
+            .Include(a => a.ServiceItems)
+                .ThenInclude(i => i.ServiceType)
+            .Where(a => a.Status != AppointmentStatus.Cancelled &&
+                        a.StartTime >= startDateTime &&
+                        a.StartTime <= endDateTime)
+            .OrderBy(a => a.StartTime)
+            .ToListAsync();
+
+        days = Enumerable.Range(0, 7)
+            .Select(offset => BuildDay(today.AddDays(offset), workingHours, appointments))
+            .ToList();
+
+        busyCount = days.Sum(d => d.Appointments.Count);
+        freeSlotCount = days.Sum(d => d.Slots.Count(s => !s.IsBusy));
+        closedDayCount = days.Count(d => !d.IsOpen);
+    }
+
+    private CalendarDay BuildDay(DateOnly date, List<WorkingHour> workingHours, List<Appointment> appointments)
+    {
+        var workingHour = workingHours.FirstOrDefault(w => w.DayOfWeek == date.DayOfWeek);
+        var dayAppointments = appointments
+            .Where(a => DateOnly.FromDateTime(a.StartTime) == date)
+            .OrderBy(a => a.StartTime)
+            .ToList();
+
+        if (workingHour is null || !workingHour.IsOpen)
+        {
+            return new CalendarDay(date, false, TimeSpan.Zero, TimeSpan.Zero, dayAppointments, new());
+        }
+
+        var slots = new List<CalendarSlot>();
+        var step = TimeSpan.FromMinutes(slotStepMinutes);
+        var cursor = workingHour.StartTime;
+
+        while (cursor < workingHour.EndTime)
+        {
+            var slotStart = date.ToDateTime(TimeOnly.FromTimeSpan(cursor));
+            var slotEnd = slotStart.Add(step);
+            var isBusy = dayAppointments.Any(a => slotStart < a.EndTime && a.StartTime < slotEnd);
+            slots.Add(new CalendarSlot(cursor, isBusy));
+            cursor = cursor.Add(step);
+        }
+
+        return new CalendarDay(date, true, workingHour.StartTime, workingHour.EndTime, dayAppointments, slots);
+    }
+
+    private static string DisplayServices(Appointment appointment)
+    {
+        if (appointment.ServiceItems.Count > 0)
+        {
+            return string.Join(" + ", appointment.ServiceItems
+                .Where(i => i.ServiceType is not null)
+                .OrderBy(i => i.ServiceType!.SortOrder)
+                .Select(i => i.ServiceType!.Name));
+        }
+
+        return appointment.ServiceType?.Name ?? "-";
+    }
+
+    private static string TurkceGun(DayOfWeek day) => day switch
+    {
+        DayOfWeek.Monday => "Pazartesi",
+        DayOfWeek.Tuesday => "Salı",
+        DayOfWeek.Wednesday => "Çarşamba",
+        DayOfWeek.Thursday => "Perşembe",
+        DayOfWeek.Friday => "Cuma",
+        DayOfWeek.Saturday => "Cumartesi",
+        DayOfWeek.Sunday => "Pazar",
+        _ => day.ToString()
+    };
+
+    private record CalendarDay(
+        DateOnly Date,
+        bool IsOpen,
+        TimeSpan Start,
+        TimeSpan End,
+        List<Appointment> Appointments,
+        List<CalendarSlot> Slots);
+
+    private record CalendarSlot(TimeSpan Time, bool IsBusy);
+}

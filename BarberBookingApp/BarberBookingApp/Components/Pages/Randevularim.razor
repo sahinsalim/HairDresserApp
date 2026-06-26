@@ -14,6 +14,20 @@
             <h2>Randevularım</h2>
         </div>
 
+        <div class="ka-form-card mb-4">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+                <div>
+                    <div class="text-muted small">Ad Soyad</div>
+                    <h5 class="mb-0">@customerName</h5>
+                </div>
+                <div>
+                    <div class="text-muted small">Telefon</div>
+                    <div class="fw-semibold">@customerPhone</div>
+                </div>
+                <a href="/randevu-al" class="btn btn-gold">Yeni Randevu Al</a>
+            </div>
+        </div>
+
         @if (appointments is null)
         {
             <p class="text-center text-muted">Yükleniyor...</p>
@@ -28,19 +42,49 @@
         }
         else
         {
+            @if (!string.IsNullOrWhiteSpace(statusMessage))
+            {
+                <div class="alert alert-success small">@statusMessage</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(errorMessage))
+            {
+                <div class="alert alert-danger small">@errorMessage</div>
+            }
+
             <div class="d-flex flex-column gap-3">
                 @foreach (var a in appointments)
                 {
-                    <div class="ka-card p-4 d-flex justify-content-between align-items-center flex-wrap gap-3">
-                        <div>
-                            <h6 class="mb-1">@a.ServiceType?.Name</h6>
-                            <div class="text-muted small">
-                                <i class="bi bi-calendar3 me-1"></i>@a.StartTime.ToString("dd MMMM yyyy, dddd", new System.Globalization.CultureInfo("tr-TR"))
-                                &nbsp;·&nbsp;
-                                <i class="bi bi-clock me-1"></i>@a.StartTime.ToString("HH:mm") - @a.EndTime.ToString("HH:mm")
+                    <div class="ka-card p-4">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                            <div>
+                                <h6 class="mb-1">@DisplayServices(a)</h6>
+                                <div class="text-muted small">
+                                    <i class="bi bi-calendar3 me-1"></i>@a.StartTime.ToString("dd MMMM yyyy, dddd", new System.Globalization.CultureInfo("tr-TR"))
+                                    &nbsp;·&nbsp;
+                                    <i class="bi bi-clock me-1"></i>@a.StartTime.ToString("HH:mm")
+                                </div>
+                            </div>
+                            <div class="d-flex align-items-center gap-2 flex-wrap">
+                                <span class="badge @StatusBadgeClass(a.Status) px-3 py-2">@StatusText(a.Status)</span>
+                                @if (CanCancel(a))
+                                {
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => StartCancel(a.Id)">
+                                        İptal Et
+                                    </button>
+                                }
                             </div>
                         </div>
-                        <span class="badge @StatusBadgeClass(a.Status) px-3 py-2">@StatusText(a.Status)</span>
+                        @if (cancelingId == a.Id)
+                        {
+                            <div class="mt-3 pt-3 border-top" style="border-color: var(--ka-border) !important;">
+                                <label class="form-label small">İptal nedeni <span class="text-muted">(isteğe bağlı)</span></label>
+                                <textarea class="form-control mb-2" rows="2" @bind="cancelReason" placeholder="Kısa bir not yazabilirsiniz"></textarea>
+                                <button class="btn btn-sm btn-gold me-2" @onclick="() => ConfirmCancel(a.Id)" disabled="@cancelling">
+                                    @(cancelling ? "İptal ediliyor..." : "İptali Onayla")
+                                </button>
+                                <button class="btn btn-sm btn-outline-gold" @onclick="CancelCancel">Vazgeç</button>
+                            </div>
+                        }
                     </div>
                 }
             </div>
@@ -50,20 +94,79 @@
 
 @code {
     private List<Appointment>? appointments;
+    private string customerName = string.Empty;
+    private string customerPhone = string.Empty;
+    private int? cancelingId;
+    private string cancelReason = string.Empty;
+    private bool cancelling;
+    private string? statusMessage;
+    private string? errorMessage;
 
     protected override async Task OnInitializedAsync()
     {
         var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        customerName = authState.User.Identity?.Name ?? "Müşteri";
+        customerPhone = authState.User.FindFirst("PhoneNumber")?.Value ?? "-";
+
         var customerIdClaim = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
         if (customerIdClaim is not null && int.TryParse(customerIdClaim.Value, out var customerId))
         {
-            appointments = await AppointmentService.GetCustomerAppointmentsAsync(customerId);
+            await LoadAppointments(customerId);
         }
         else
         {
             appointments = new();
         }
     }
+
+    private async Task LoadAppointments(int customerId)
+    {
+        appointments = await AppointmentService.GetCustomerAppointmentsAsync(customerId);
+    }
+
+    private void StartCancel(int appointmentId)
+    {
+        statusMessage = null;
+        errorMessage = null;
+        cancelingId = appointmentId;
+        cancelReason = string.Empty;
+    }
+
+    private void CancelCancel()
+    {
+        cancelingId = null;
+        cancelReason = string.Empty;
+    }
+
+    private async Task ConfirmCancel(int appointmentId)
+    {
+        statusMessage = null;
+        errorMessage = null;
+        cancelling = true;
+
+        var result = await AppointmentService.CancelAppointmentAsync(appointmentId, "Customer", cancelReason);
+        cancelling = false;
+
+        if (!result.Success)
+        {
+            errorMessage = result.ErrorMessage;
+            return;
+        }
+
+        cancelingId = null;
+        cancelReason = string.Empty;
+        statusMessage = "Randevunuz iptal edildi.";
+
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var customerIdClaim = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (customerIdClaim is not null && int.TryParse(customerIdClaim.Value, out var customerId))
+        {
+            await LoadAppointments(customerId);
+        }
+    }
+
+    private static bool CanCancel(Appointment appointment) =>
+        appointment.Status == AppointmentStatus.Confirmed && appointment.StartTime > DateTime.Now;
 
     private static string StatusBadgeClass(AppointmentStatus status) => status switch
     {
@@ -80,4 +183,17 @@
         AppointmentStatus.Completed => "Tamamlandı",
         _ => status.ToString()
     };
+
+    private static string DisplayServices(Appointment appointment)
+    {
+        if (appointment.ServiceItems.Count > 0)
+        {
+            return string.Join(" + ", appointment.ServiceItems
+                .Where(i => i.ServiceType is not null)
+                .OrderBy(i => i.ServiceType!.SortOrder)
+                .Select(i => i.ServiceType!.Name));
+        }
+
+        return appointment.ServiceType?.Name ?? "-";
+    }
 }

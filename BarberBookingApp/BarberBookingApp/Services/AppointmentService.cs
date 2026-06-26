@@ -23,15 +23,27 @@ public class AppointmentService : IAppointmentService
 
     public DateOnly GetMaxBookingDate() => DateOnly.FromDateTime(DateTime.Now).AddDays(_maxBookingDaysAhead);
 
-    public async Task<List<TimeSpan>> GetAvailableSlotsAsync(DateOnly date, int serviceTypeId)
+    public Task<List<TimeSpan>> GetAvailableSlotsAsync(DateOnly date, int serviceTypeId) =>
+        GetAvailableSlotsAsync(date, new[] { serviceTypeId });
+
+    public async Task<List<TimeSpan>> GetAvailableSlotsAsync(DateOnly date, IReadOnlyCollection<int> serviceTypeIds)
     {
         if (date < GetMinBookingDate() || date > GetMaxBookingDate())
         {
             return new List<TimeSpan>();
         }
 
-        var serviceType = await _db.ServiceTypes.FindAsync(serviceTypeId);
-        if (serviceType is null || !serviceType.IsActive)
+        var selectedServiceIds = serviceTypeIds.Distinct().ToList();
+        if (selectedServiceIds.Count == 0)
+        {
+            return new List<TimeSpan>();
+        }
+
+        var serviceTypes = await _db.ServiceTypes
+            .Where(s => selectedServiceIds.Contains(s.Id) && s.IsActive)
+            .ToListAsync();
+
+        if (serviceTypes.Count != selectedServiceIds.Count)
         {
             return new List<TimeSpan>();
         }
@@ -53,7 +65,7 @@ public class AppointmentService : IAppointmentService
             .Select(a => new { a.StartTime, a.EndTime })
             .ToListAsync();
 
-        var duration = TimeSpan.FromMinutes(serviceType.DurationMinutes);
+        var duration = TimeSpan.FromMinutes(CalculateCombinedDurationMinutes(serviceTypes));
         var step = TimeSpan.FromMinutes(_slotStepMinutes);
         var now = DateTime.Now;
 
@@ -79,20 +91,27 @@ public class AppointmentService : IAppointmentService
         return slots;
     }
 
-    public async Task<AppointmentResult> CreateAppointmentAsync(int customerId, int serviceTypeId, DateTime startTime)
+    public Task<AppointmentResult> CreateAppointmentAsync(int customerId, int serviceTypeId, DateTime startTime) =>
+        CreateAppointmentAsync(customerId, new[] { serviceTypeId }, startTime);
+
+    public async Task<AppointmentResult> CreateAppointmentAsync(int customerId, IReadOnlyCollection<int> serviceTypeIds, DateTime startTime)
     {
         var date = DateOnly.FromDateTime(startTime);
+        var selectedServiceIds = serviceTypeIds.Distinct().ToList();
 
-        var availableSlots = await GetAvailableSlotsAsync(date, serviceTypeId);
+        var availableSlots = await GetAvailableSlotsAsync(date, selectedServiceIds);
         if (!availableSlots.Contains(startTime.TimeOfDay))
         {
             return new AppointmentResult(false, "Seçilen saat artık uygun değil, lütfen başka bir saat seçin.");
         }
 
-        var serviceType = await _db.ServiceTypes.FindAsync(serviceTypeId);
-        if (serviceType is null)
+        var serviceTypes = await _db.ServiceTypes
+            .Where(s => selectedServiceIds.Contains(s.Id) && s.IsActive)
+            .ToListAsync();
+
+        if (serviceTypes.Count == 0 || serviceTypes.Count != selectedServiceIds.Count)
         {
-            return new AppointmentResult(false, "Hizmet bulunamadı.");
+            return new AppointmentResult(false, "Seçilen hizmetler bulunamadı.");
         }
 
         var customer = await _db.Customers.FindAsync(customerId);
@@ -101,12 +120,18 @@ public class AppointmentService : IAppointmentService
             return new AppointmentResult(false, "Müşteri bulunamadı.");
         }
 
+        var primaryService = serviceTypes
+            .OrderByDescending(s => s.DurationMinutes)
+            .ThenBy(s => s.SortOrder)
+            .First();
+        var durationMinutes = CalculateCombinedDurationMinutes(serviceTypes);
+
         var appointment = new Appointment
         {
             CustomerId = customerId,
-            ServiceTypeId = serviceTypeId,
+            ServiceTypeId = primaryService.Id,
             StartTime = startTime,
-            EndTime = startTime.AddMinutes(serviceType.DurationMinutes),
+            EndTime = startTime.AddMinutes(durationMinutes),
             Status = AppointmentStatus.Confirmed,
             CreatedAt = DateTime.UtcNow
         };
@@ -114,8 +139,21 @@ public class AppointmentService : IAppointmentService
         _db.Appointments.Add(appointment);
         await _db.SaveChangesAsync();
 
+        _db.AppointmentServiceItems.AddRange(serviceTypes.Select(s => new AppointmentServiceItem
+        {
+            AppointmentId = appointment.Id,
+            ServiceTypeId = s.Id
+        }));
+        await _db.SaveChangesAsync();
+
+        appointment.ServiceItems = serviceTypes
+            .OrderBy(s => s.SortOrder)
+            .Select(s => new AppointmentServiceItem { AppointmentId = appointment.Id, ServiceTypeId = s.Id, ServiceType = s })
+            .ToList();
+
+        var serviceNames = string.Join(" + ", serviceTypes.OrderBy(s => s.SortOrder).Select(s => s.Name));
         await _smsService.SendAsync(customer.PhoneNumber,
-            $"Randevunuz alindi: {startTime:dd.MM.yyyy HH:mm} - {serviceType.Name}. Kuaför Arif sizi bekliyor!");
+            $"Randevunuz alindi: {startTime:dd.MM.yyyy HH:mm} - {serviceNames}. Kuaför Arif sizi bekliyor!");
 
         return new AppointmentResult(true, null, appointment);
     }
@@ -124,6 +162,8 @@ public class AppointmentService : IAppointmentService
     {
         return await _db.Appointments
             .Include(a => a.ServiceType)
+            .Include(a => a.ServiceItems)
+                .ThenInclude(i => i.ServiceType)
             .Where(a => a.CustomerId == customerId)
             .OrderByDescending(a => a.StartTime)
             .ToListAsync();
@@ -134,6 +174,8 @@ public class AppointmentService : IAppointmentService
         var query = _db.Appointments
             .Include(a => a.Customer)
             .Include(a => a.ServiceType)
+            .Include(a => a.ServiceItems)
+                .ThenInclude(i => i.ServiceType)
             .AsQueryable();
 
         if (date.HasValue)
@@ -156,6 +198,8 @@ public class AppointmentService : IAppointmentService
         var appointment = await _db.Appointments
             .Include(a => a.Customer)
             .Include(a => a.ServiceType)
+            .Include(a => a.ServiceItems)
+                .ThenInclude(i => i.ServiceType)
             .FirstOrDefaultAsync(a => a.Id == appointmentId);
 
         if (appointment is null)
@@ -177,11 +221,34 @@ public class AppointmentService : IAppointmentService
 
         if (appointment.Customer is not null)
         {
+            var serviceNames = appointment.ServiceItems.Count > 0
+                ? string.Join(" + ", appointment.ServiceItems
+                    .Where(i => i.ServiceType is not null)
+                    .OrderBy(i => i.ServiceType!.SortOrder)
+                    .Select(i => i.ServiceType!.Name))
+                : appointment.ServiceType?.Name;
+
             await _smsService.SendAsync(appointment.Customer.PhoneNumber,
-                $"Randevunuz iptal edilmistir: {appointment.StartTime:dd.MM.yyyy HH:mm} - {appointment.ServiceType?.Name}. " +
+                $"Randevunuz iptal edilmistir: {appointment.StartTime:dd.MM.yyyy HH:mm} - {serviceNames}. " +
                 "Bilgi için Kuaför Arif ile iletişime geçebilirsiniz.");
         }
 
         return new AppointmentResult(true, null, appointment);
+    }
+
+    private static int CalculateCombinedDurationMinutes(IReadOnlyCollection<ServiceType> serviceTypes)
+    {
+        if (serviceTypes.Count == 0)
+        {
+            return 0;
+        }
+
+        var orderedDurations = serviceTypes
+            .Select(s => s.DurationMinutes)
+            .OrderByDescending(d => d)
+            .ToList();
+
+        var total = orderedDurations[0] + orderedDurations.Skip(1).Sum(d => d / 2.0);
+        return (int)(Math.Ceiling(total / 5.0) * 5);
     }
 }

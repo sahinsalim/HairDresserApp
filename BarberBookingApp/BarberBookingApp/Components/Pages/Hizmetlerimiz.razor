@@ -33,10 +33,7 @@
                             <div class="ka-icon"><i class="@s.Icon"></i></div>
                             <h4>@s.Name</h4>
                             <p class="text-muted flex-grow-1">@s.Description</p>
-                            <div class="d-flex justify-content-between align-items-center mb-3">
-                                <span class="badge rounded-pill text-bg-dark border border-secondary">
-                                    <i class="bi bi-clock me-1"></i>@s.DurationMinutes dk
-                                </span>
+                            <div class="d-flex justify-content-end align-items-center mb-3">
                                 @if (s.Price > 0)
                                 {
                                     <span class="text-gold fs-5 fw-semibold">@s.Price.ToString("0") ₺</span>

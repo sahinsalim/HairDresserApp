@@ -6,6 +6,7 @@ using BarberBookingApp.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Twilio;
 
 // Müşteriler Türk olduğu için tarih/saat metinleri (ay, gün adları) Türkçe gösterilir.
@@ -33,18 +34,22 @@ if (!string.IsNullOrWhiteSpace(twilioAccountSid) && !string.IsNullOrWhiteSpace(t
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// Database:Provider "Sqlite" (varsayılan, sunucu kurulumu gerektirmeyen tek dosyalık veritabanı) veya
-// "SqlServer" (LocalDB/SQL Server, üretim için ölçeklenebilir kurulum) olarak ayarlanabilir.
-// MSSQL koduna hiç dokunulmadı; appsettings.json'da "Database:Provider": "SqlServer" yapıp
-// ConnectionStrings:DefaultConnection'ı geçerli bir SQL Server'a işaret ettirerek tekrar etkinleştirilebilir.
+// Database:Provider "Sqlite" (local demo), "Postgres" (Render/Neon/Supabase gibi canlı ortamlar)
+// veya "SqlServer" olarak ayarlanabilir.
 var dbProvider = builder.Configuration["Database:Provider"] ?? "Sqlite";
 var useSqlServer = string.Equals(dbProvider, "SqlServer", StringComparison.OrdinalIgnoreCase);
+var usePostgres = string.Equals(dbProvider, "Postgres", StringComparison.OrdinalIgnoreCase) ||
+                  string.Equals(dbProvider, "PostgreSQL", StringComparison.OrdinalIgnoreCase);
 
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
     if (useSqlServer)
     {
         options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
+    }
+    else if (usePostgres)
+    {
+        options.UseNpgsql(GetPostgresConnectionString(builder.Configuration));
     }
     else
     {
@@ -111,8 +116,29 @@ using (var scope = app.Services.CreateScope())
     }
     else
     {
-        // Sqlite modu: tek dosyalık veritabanı için migration geçmişi tutmuyoruz, şema doğrudan modelden oluşturuluyor.
+        // Sqlite/Postgres demo modu: şema doğrudan güncel modelden oluşturulur.
         db.Database.EnsureCreated();
+
+        if (!usePostgres)
+        {
+            db.Database.ExecuteSqlRaw("""
+                CREATE TABLE IF NOT EXISTS "AppointmentServiceItems" (
+                    "Id" INTEGER NOT NULL CONSTRAINT "PK_AppointmentServiceItems" PRIMARY KEY AUTOINCREMENT,
+                    "AppointmentId" INTEGER NOT NULL,
+                    "ServiceTypeId" INTEGER NOT NULL,
+                    CONSTRAINT "FK_AppointmentServiceItems_Appointments_AppointmentId" FOREIGN KEY ("AppointmentId") REFERENCES "Appointments" ("Id") ON DELETE CASCADE,
+                    CONSTRAINT "FK_AppointmentServiceItems_ServiceTypes_ServiceTypeId" FOREIGN KEY ("ServiceTypeId") REFERENCES "ServiceTypes" ("Id") ON DELETE RESTRICT
+                );
+                """);
+            db.Database.ExecuteSqlRaw("""
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_AppointmentServiceItems_AppointmentId_ServiceTypeId"
+                ON "AppointmentServiceItems" ("AppointmentId", "ServiceTypeId");
+                """);
+            db.Database.ExecuteSqlRaw("""
+                CREATE INDEX IF NOT EXISTS "IX_AppointmentServiceItems_ServiceTypeId"
+                ON "AppointmentServiceItems" ("ServiceTypeId");
+                """);
+        }
     }
     SeedData.Initialize(db);
 }
@@ -141,3 +167,36 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+static string GetPostgresConnectionString(IConfiguration configuration)
+{
+    var connectionString = configuration.GetConnectionString("Postgres")
+                           ?? configuration.GetConnectionString("DefaultConnection")
+                           ?? configuration["DATABASE_URL"];
+
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        throw new InvalidOperationException(
+            "Postgres için ConnectionStrings:Postgres veya DATABASE_URL environment variable tanımlanmalıdır.");
+    }
+
+    if (!connectionString.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) &&
+        !connectionString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+    {
+        return connectionString;
+    }
+
+    var uri = new Uri(connectionString);
+    var userInfo = uri.UserInfo.Split(':', 2);
+    var npgsqlBuilder = new NpgsqlConnectionStringBuilder
+    {
+        Host = uri.Host,
+        Port = uri.Port > 0 ? uri.Port : 5432,
+        Database = uri.AbsolutePath.TrimStart('/'),
+        Username = Uri.UnescapeDataString(userInfo[0]),
+        Password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : string.Empty,
+        SslMode = SslMode.Require
+    };
+
+    return npgsqlBuilder.ConnectionString;
+}

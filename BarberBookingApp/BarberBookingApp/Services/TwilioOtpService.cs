@@ -10,6 +10,7 @@ public class TwilioOtpService : IOtpService
 {
     private static readonly TimeSpan CodeLifetime = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan ResendCooldown = TimeSpan.FromSeconds(60);
+    private const string DemoCode = "0000";
 
     private readonly AppDbContext _db;
     private readonly IConfiguration _configuration;
@@ -29,10 +30,17 @@ public class TwilioOtpService : IOtpService
         !string.IsNullOrWhiteSpace(_configuration["Twilio:AuthToken"]) &&
         !string.IsNullOrWhiteSpace(VerifyServiceSid);
 
+    private bool IsDemoOtpEnabled => _configuration.GetValue("AppSettings:DemoOtpEnabled", true);
+
     public async Task<OtpRequestResult> RequestCodeAsync(string phoneNumber)
     {
         var now = DateTime.UtcNow;
         phoneNumber = phoneNumber.Trim();
+
+        if (IsDemoOtpEnabled)
+        {
+            return await RequestDemoCodeAsync(phoneNumber, now);
+        }
 
         var lastLog = await _db.SmsLogs
             .Where(l => l.PhoneNumber == phoneNumber)
@@ -91,6 +99,11 @@ public class TwilioOtpService : IOtpService
     {
         phoneNumber = phoneNumber.Trim();
 
+        if (IsDemoOtpEnabled)
+        {
+            return await VerifyDemoCodeAsync(phoneNumber, code);
+        }
+
         if (!IsConfigured)
         {
             return await VerifySimulatedCodeAsync(phoneNumber, code);
@@ -110,6 +123,46 @@ public class TwilioOtpService : IOtpService
             _logger.LogError(ex, "Twilio Verify kod doğrulaması başarısız: {Phone}", phoneNumber);
             return false;
         }
+    }
+
+    private async Task<OtpRequestResult> RequestDemoCodeAsync(string phoneNumber, DateTime now)
+    {
+        _db.OtpVerifications.Add(new OtpVerification
+        {
+            PhoneNumber = phoneNumber,
+            Code = DemoCode,
+            ExpiresAt = now.Add(CodeLifetime),
+            CreatedAt = now,
+            IsUsed = false
+        });
+
+        await _db.SaveChangesAsync();
+        _logger.LogInformation("[DEMO-OTP] -> {Phone}: sabit kod {Code}", phoneNumber, DemoCode);
+
+        return new OtpRequestResult(true, null);
+    }
+
+    private async Task<bool> VerifyDemoCodeAsync(string phoneNumber, string code)
+    {
+        if (code.Trim() != DemoCode)
+        {
+            return false;
+        }
+
+        var now = DateTime.UtcNow;
+        var otp = await _db.OtpVerifications
+            .Where(o => o.PhoneNumber == phoneNumber && !o.IsUsed && o.ExpiresAt > now)
+            .OrderByDescending(o => o.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        if (otp is null)
+        {
+            return false;
+        }
+
+        otp.IsUsed = true;
+        await _db.SaveChangesAsync();
+        return true;
     }
 
     private async Task<OtpRequestResult> RequestSimulatedCodeAsync(string phoneNumber, DateTime now)

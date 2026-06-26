@@ -2,7 +2,11 @@ bin/
 obj/
 *.user
 .vs/
+.DS_Store
+appsettings.*.local.json
+appsettings.Production.json
 BerberArif/App_Data/
+BarberBookingApp/App_Data/
 publish_output/
 *.log
 *.pid

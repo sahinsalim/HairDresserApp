@@ -9,7 +9,7 @@
     <div class="container" style="max-width:480px;">
         <div class="ka-form-card">
             <h3 class="text-center mb-1">Giriş Yap</h3>
-            <p class="text-muted text-center mb-4">Telefon numaranızla SMS doğrulama kodu alın</p>
+            <p class="text-muted text-center mb-4">Telefon numaranız ve ad soyadınızla demo giriş yapın</p>
 
             @if (Error == "name-required")
             {
@@ -24,31 +24,28 @@
             {
                 <div class="mb-3">
                     <label class="form-label">Telefon Numarası</label>
-                    <input type="tel" class="form-control" @bind="phoneNumber" placeholder="05XX XXX XX XX" />
+                    <input type="tel" class="form-control" @bind="phoneNumber" @bind:event="oninput" placeholder="05XX XXX XX XX" />
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Ad Soyad <span class="text-muted small">(yeni üyelik için)</span></label>
-                    <input type="text" class="form-control" @bind="fullName" placeholder="Adınız Soyadınız" />
+                    <input type="text" class="form-control" @bind="fullName" @bind:event="oninput" placeholder="Adınız Soyadınız" />
                 </div>
                 @if (!string.IsNullOrEmpty(requestError))
                 {
                     <div class="alert alert-danger small">@requestError</div>
                 }
                 <button class="btn btn-gold w-100" @onclick="RequestCode" disabled="@requesting">
-                    @(requesting ? "Gönderiliyor..." : "Doğrulama Kodu Gönder")
+                    @(requesting ? "Hazırlanıyor..." : "Devam Et")
                 </button>
             }
             else
             {
-                @if (!string.IsNullOrEmpty(testCode))
-                {
-                    <div class="alert alert-info small">
-                        <i class="bi bi-info-circle me-1"></i>
-                        Test modu: SMS hesabı henüz tanımlanmadığı için kodunuz burada gösteriliyor: <strong>@testCode</strong>
-                    </div>
-                }
+                <div class="alert alert-info small">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Demo modunda SMS gönderilmez. Giriş kodu: <strong>0000</strong>
+                </div>
                 <p class="text-muted small mb-3">
-                    <strong>@phoneNumber</strong> numarasına gönderilen 6 haneli kodu girin.
+                    <strong>@phoneNumber</strong> numarası için demo doğrulama kodunu girin.
                 </p>
                 <form method="post" action="/api/auth/verify-otp">
                     <input type="hidden" name="phoneNumber" value="@phoneNumber" />
@@ -56,7 +53,7 @@
                     <input type="hidden" name="returnUrl" value="@ReturnUrl" />
                     <div class="mb-3">
                         <label class="form-label">Doğrulama Kodu</label>
-                        <input type="text" name="code" class="form-control text-center" maxlength="6" inputmode="numeric" placeholder="------" required />
+                        <input type="text" name="code" class="form-control text-center" maxlength="4" inputmode="numeric" placeholder="0000" required />
                     </div>
                     <button type="submit" class="btn btn-gold w-100">Doğrula ve Giriş Yap</button>
                 </form>
@@ -83,7 +80,6 @@
     private bool codeSent;
     private bool requesting;
     private string? requestError;
-    private string? testCode;
 
     protected override void OnInitialized()
     {
@@ -96,7 +92,6 @@
     private async Task RequestCode()
     {
         requestError = null;
-        testCode = null;
 
         if (string.IsNullOrWhiteSpace(phoneNumber) || phoneNumber.Where(char.IsDigit).Count() < 10)
         {
@@ -116,18 +111,5 @@
 
         codeSent = true;
 
-        var lastLog = await Db.SmsLogs
-            .Where(l => l.PhoneNumber == phoneNumber.Trim() && l.Provider.StartsWith("Simulated"))
-            .OrderByDescending(l => l.SentAt)
-            .FirstOrDefaultAsync();
-
-        if (lastLog is not null)
-        {
-            var match = System.Text.RegularExpressions.Regex.Match(lastLog.Message, @"\d{6}");
-            if (match.Success)
-            {
-                testCode = match.Value;
-            }
-        }
     }
 }

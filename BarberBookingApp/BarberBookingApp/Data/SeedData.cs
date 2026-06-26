@@ -71,33 +71,13 @@ public static class SeedData
                 db.WorkingHours.Add(new WorkingHour
                 {
                     DayOfWeek = day,
-                    IsOpen = day != DayOfWeek.Friday,
+                    IsOpen = day != DayOfWeek.Sunday,
                     StartTime = new TimeSpan(9, 0, 0),
-                    EndTime = new TimeSpan(19, 0, 0)
+                    EndTime = new TimeSpan(22, 0, 0)
                 });
             }
 
             db.SaveChanges();
-        }
-
-        // Mevcut (zaten canlıda seed edilmiş) veritabanlarında da iş günü politikasını
-        // uygula: Cuma kapalı, Cumartesi ve Pazar açık. Saat aralıklarına dokunulmaz.
-        var friday = db.WorkingHours.FirstOrDefault(w => w.DayOfWeek == DayOfWeek.Friday);
-        if (friday is not null)
-        {
-            friday.IsOpen = false;
-        }
-
-        var saturday = db.WorkingHours.FirstOrDefault(w => w.DayOfWeek == DayOfWeek.Saturday);
-        if (saturday is not null)
-        {
-            saturday.IsOpen = true;
-        }
-
-        var sunday = db.WorkingHours.FirstOrDefault(w => w.DayOfWeek == DayOfWeek.Sunday);
-        if (sunday is not null)
-        {
-            sunday.IsOpen = true;
         }
 
         db.SaveChanges();

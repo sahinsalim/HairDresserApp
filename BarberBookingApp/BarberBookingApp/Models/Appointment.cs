@@ -9,6 +9,7 @@ public class Appointment
 
     public int ServiceTypeId { get; set; }
     public ServiceType? ServiceType { get; set; }
+    public List<AppointmentServiceItem> ServiceItems { get; set; } = new();
 
     public DateTime StartTime { get; set; }
     public DateTime EndTime { get; set; }
